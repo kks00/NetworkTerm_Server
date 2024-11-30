@@ -207,8 +207,25 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		printf("Payload: %s\n", byteArrayToHexString(recv_buf, message_info.payload_length).c_str());
 	case FD_WRITE:
 		if (recv_buf) {
-			// 접속해있는 모든 클라이언트에게 전송
-			tcp_send_to_all(message_info.payload_type, (char*)recv_buf, message_info.payload_length);
+			ptr = GetSocketInfo(wParam);
+			if (!ptr) {
+				printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
+				return;
+			}
+
+			if (message_info.payload_type == SET_USER_NAME) { // 초기 이름설정 처리
+				ptr->user_id = (char*)recv_buf;
+				printf("사용자 이름: %s\n", ptr->user_id.c_str());
+			}
+			else if (message_info.payload_type == CHATTING) { // 채팅 처리
+				char chat_msg[BUFSIZE];
+				sprintf_s(chat_msg, "[%s] %s", ptr->user_id.c_str(), recv_buf); // [아이디] 채팅 형식으로 전송
+				tcp_send_to_all(message_info.payload_type, chat_msg, strlen(chat_msg) + 1);
+			}
+			else {
+				// 채팅이 아닐경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
+				tcp_send_to_all(message_info.payload_type, (char*)recv_buf, message_info.payload_length);
+			}
 
 			// 처리 후 버퍼 할당해제
 			free(recv_buf);

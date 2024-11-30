@@ -8,6 +8,8 @@
 
 // 메세지 타입 정의
 #define MESSAGE_INFO 1100
+#define SET_USER_NAME 1101
+
 #define CHATTING			  1000          // 메시지 타입: 채팅
 
 #define DRAW_LINE             1001			// 메시지 타입: 선
