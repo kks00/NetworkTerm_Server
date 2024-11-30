@@ -214,7 +214,7 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 
 			if (message_info.payload_type == SET_USER_NAME) { // 초기 이름설정 처리
-				ptr->user_id = (char*)recv_buf;
+				ptr->user_id = (char*)recv_buf; // 이름을 소켓 구조체에 저장해두기
 				printf("사용자 이름: %s\n", ptr->user_id.c_str());
 			}
 			else if (message_info.payload_type == CHATTING) { // 채팅 처리
@@ -274,12 +274,17 @@ void ProcessUDPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			return;
 		}
 
+		
+	recv_payload:
 		// 받은 페이로드 크기만큼 가변 길이 페이로드 받기
 		retval = recvfrom(sock, (char*)recv_buf, message_info.payload_length, 0, (sockaddr*)&clientaddr, &addrlen);
 		if (retval == SOCKET_ERROR) {
-			err_display("ProcessUDPSocketMessage recv()");
-			free(recv_buf);
-			return;
+			if (WSAGetLastError() == WSAEWOULDBLOCK) // 페이로드를 받을 때까지 계속 시도
+				goto recv_payload;
+			else {
+				free(recv_buf);
+				return;
+			}
 		}
 
 		// 받은 데이터 출력
