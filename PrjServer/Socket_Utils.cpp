@@ -24,9 +24,15 @@ void tcp_send_to_all(int message_type, char* payload_buf, int payload_size) {
 			continue;
 		}
 
+		SOCKADDR_IN clientaddr;
+		int addrlen = sizeof(clientaddr);
+		getpeername(ptr->sock, (SOCKADDR*)&clientaddr, &addrlen);
+		printf("[%s] sent %d bytes to %s:%d\n", __func__, retval, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
+
 		ptr = ptr->next;
 	}
 }
+
 
 // 소켓 정보 추가
 BOOL AddSocketInfo(SOCKET sock, string id)
@@ -38,8 +44,12 @@ BOOL AddSocketInfo(SOCKET sock, string id)
 	}
 
 	ptr->sock = sock;
+
 	ptr->is_info_received = false;
 	memset(&ptr->last_message_info, 0, sizeof(MessageInfo));
+	ptr->recv_buf = NULL;
+	ptr->recv_bytes = 0;
+
 	ptr->user_id = id;
 	ptr->next = SocketInfoList;
 	SocketInfoList = ptr;

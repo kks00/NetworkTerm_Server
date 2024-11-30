@@ -9,9 +9,9 @@
 // 메세지 타입 정의
 #define MESSAGE_INFO 1100
 #define SET_USER_NAME 1101
+#define UPLOAD_IMAGE 1102
 
 #define CHATTING			  1000          // 메시지 타입: 채팅
-
 #define DRAW_LINE             1001			// 메시지 타입: 선
 #define DRAW_STRAIGHTLINE     1002			// 메시지 타입: 직선
 #define DRAW_ELLIPSE          1003			// 메시지 타입: 타원
@@ -22,6 +22,7 @@
 #define DRAW_PARALLELOGRAM    1008 			// 메시지 타입: 평행사변형
 #define DRAW_DIAMOND          1009			// 메시지 타입: 마름모
 #define DRAW_ARROW            1010			// 메시지 타입: 화살표
+
 #define DRAW_ERASER           1011			// 메시지 타입: 지우개
 
 
@@ -37,26 +38,17 @@ struct MessageInfo {
 struct SOCKETINFO
 {
 	SOCKET sock;
+
 	bool is_info_received;
 	MessageInfo last_message_info;
+	char* recv_buf;
+	size_t recv_bytes;
 
 	string user_id;
 
 	SOCKETINFO* next;
 };
 extern SOCKETINFO* SocketInfoList;
-
-// 선 그리기 메시지 형식
-struct DRAWLINE_MSG
-{
-	int  type;
-	int  color;
-	int	 width;
-	int	 line;
-	int  x0, y0;
-	int  x1, y1;
-};
-
 
 void tcp_send_to_all(int message_type, char* payload_buf, int payload_size);
 

@@ -116,8 +116,7 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	SOCKET client_sock;
 	SOCKADDR_IN clientaddr;
 	int addrlen, retval;
-
-	unsigned char* recv_buf = NULL;
+	MessageInfo message_info;
 
 	// 오류 발생 여부 확인
 	if(WSAGETSELECTERROR(lParam)){
@@ -153,7 +152,8 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
 			return;
 		}
-		
+		message_info = ptr->last_message_info;
+
 		// 메시지 정보를 받은 상태라면 페이로드 수신으로 점프
 		if (ptr->is_info_received)
 			goto receive_payload;
@@ -162,7 +162,6 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		memset(&ptr->last_message_info, 0, sizeof(MessageInfo));
 		retval = recv(ptr->sock, (char*)&ptr->last_message_info, sizeof(MessageInfo), 0);
 		if (retval == SOCKET_ERROR) {
-			// 메시지 도착하지 않은 상태에서 발생한 이벤트이므로 그냥 리턴하면 됨.
 			if (WSAGetLastError() == WSAEWOULDBLOCK)
 				return;
 			else {
@@ -172,64 +171,80 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 		}
 		ptr->is_info_received = true;
+		ptr->recv_bytes = 0;
+
+		// 메모리 동적할당
+		ptr->recv_buf = (char*)VirtualAlloc(NULL, 0xFFFFFFF, MEM_COMMIT, PAGE_READWRITE);
+		if (!ptr->recv_buf) {
+			err_display("[ProcessTCPSocketMessage] alloc");
+			return;
+		}
 
 		// 받은 메세지 정보 출력
 		addrlen = sizeof(clientaddr);
 		getpeername(wParam, (SOCKADDR*)&clientaddr, &addrlen);
-		printf("[TCP/%s:%d] Type: %d Length: %d\n", inet_ntoa(clientaddr.sin_addr),
-			ntohs(clientaddr.sin_port), ptr->last_message_info.payload_type, ptr->last_message_info.payload_length);
+		printf("[TCP/%s:%d] RecvBytes: %d Type: %d Length: %d\n", inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port), 
+			retval, ptr->last_message_info.payload_type, ptr->last_message_info.payload_length);
+
 		return;
 
-
 	receive_payload:
-		MessageInfo message_info = ptr->last_message_info;
-		// 페이로드 크기만큼 메모리 동적할당
-		recv_buf = (unsigned char*)malloc(message_info.payload_length);
-		if (!recv_buf)
-			return;
-
 		// 받은 페이로드 크기만큼 가변 길이 페이로드 받기
-		retval = recv(ptr->sock, (char*)recv_buf, message_info.payload_length, 0);
+		retval = recv(ptr->sock, ptr->recv_buf + ptr->recv_bytes, ptr->last_message_info.payload_length - ptr->recv_bytes, 0);
 		if (retval == SOCKET_ERROR) {
+			err_display("[ProcessTCPSocketMessage] recv payload");
 			if (WSAGetLastError() == WSAEWOULDBLOCK) {
-				free(recv_buf);
 				return;
 			}
 			else {
-				err_display("[ProcessTCPSocketMessage] recv payload");
 				RemoveSocketInfo(wParam);
 				return;
 			}
 		}
+		ptr->recv_bytes += retval;
+		if (ptr->recv_bytes < ptr->last_message_info.payload_length)
+			return;
+
+		// 모두 수신완료 되었을 때 처리 시작
 		ptr->is_info_received = false;
 
 		// 받은 메세지 출력
-		printf("Payload: %s\n", byteArrayToHexString(recv_buf, message_info.payload_length).c_str());
-	case FD_WRITE:
-		if (recv_buf) {
-			ptr = GetSocketInfo(wParam);
-			if (!ptr) {
-				printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
-				return;
-			}
+#ifdef LOG_PACKET_RAW
+		printf("Payload: %s\n", byteArrayToHexString(ptr->recv_buf, message_info.payload_length).c_str());
+#endif
 
+		ptr = GetSocketInfo(wParam);
+		if (!ptr) {
+			printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
+			return;
+		}
+		message_info = ptr->last_message_info;
+
+		if (ptr->recv_buf) {
 			if (message_info.payload_type == SET_USER_NAME) { // 초기 이름설정 처리
-				ptr->user_id = (char*)recv_buf; // 이름을 소켓 구조체에 저장해두기
+				ptr->user_id = (char*)ptr->recv_buf; // 이름을 소켓 구조체에 저장해두기
 				printf("사용자 이름: %s\n", ptr->user_id.c_str());
+
+				char chat_msg[BUFSIZE];
+				sprintf_s(chat_msg, "[%s] 님이 입장했습니다.", ptr->user_id.c_str()); // [아이디] 님이 입장했습니다 메시지 전송
+				tcp_send_to_all(CHATTING, chat_msg, strlen(chat_msg) + 1);
 			}
 			else if (message_info.payload_type == CHATTING) { // 채팅 처리
 				char chat_msg[BUFSIZE];
-				sprintf_s(chat_msg, "[%s] %s", ptr->user_id.c_str(), recv_buf); // [아이디] 채팅 형식으로 전송
+				sprintf_s(chat_msg, "[%s] %s", ptr->user_id.c_str(), ptr->recv_buf); // [아이디] 채팅 형식으로 전송
 				tcp_send_to_all(message_info.payload_type, chat_msg, strlen(chat_msg) + 1);
 			}
 			else {
-				// 채팅이 아닐경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
-				tcp_send_to_all(message_info.payload_type, (char*)recv_buf, message_info.payload_length);
+				// 이외 경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
+				tcp_send_to_all(message_info.payload_type, (char*)ptr->recv_buf, message_info.payload_length);
 			}
 
 			// 처리 후 버퍼 할당해제
-			free(recv_buf);
+			VirtualFree(ptr->recv_buf, 0, MEM_RELEASE);
+			ptr->recv_buf = NULL;
 		}
+		break;
+	case FD_WRITE:
 		break;
 	case FD_CLOSE:
 		RemoveSocketInfo(wParam);
@@ -269,7 +284,7 @@ void ProcessUDPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 
 		// 페이로드 크기만큼 메모리 동적할당
-		unsigned char* recv_buf = (unsigned char*)malloc(message_info.payload_length);
+		char* recv_buf = (char*)malloc(message_info.payload_length);
 		if (!recv_buf) {
 			return;
 		}
@@ -288,7 +303,9 @@ void ProcessUDPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 
 		// 받은 데이터 출력
+#ifdef LOG_PACKET_RAW
 		printf("Payload: %s\n", byteArrayToHexString(recv_buf, message_info.payload_length).c_str());
+#endif
 
 		// 접속해있는 모든 클라이언트에게 TCP로 현재 받은 데이터 전송
 		tcp_send_to_all(message_info.payload_type, (char*)recv_buf, message_info.payload_length);

@@ -2,6 +2,8 @@
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
+// #define LOG_PACKET_RAW
+
 #pragma comment(lib, "ws2_32")
 #include <winsock2.h>
 #include <stdlib.h>
@@ -12,6 +14,6 @@
 #include <string>
 using namespace std;
 
-std::string byteArrayToHexString(const unsigned char* byteArray, size_t length);
+std::string byteArrayToHexString(const char* byteArray, size_t length);
 
 #include "Socket_Utils.h"
