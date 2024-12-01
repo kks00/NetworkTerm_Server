@@ -3,7 +3,7 @@
 // 접속한 모든 클라이언트에게 받은 데이터 보내기
 void tcp_send_to_all(int message_type, char* payload_buf, int payload_size) {
 	SOCKETINFO* ptr = SocketInfoList;
-	while (ptr) {
+	while (ptr) { // 접속중인 모든 사용자 루프
 		MessageInfo message_info;
 		message_info.payload_length = payload_size;
 		message_info.payload_type = message_type;
@@ -31,6 +31,59 @@ void tcp_send_to_all(int message_type, char* payload_buf, int payload_size) {
 
 		ptr = ptr->next;
 	}
+}
+
+// 접속한 클라이언트 중 ID가 일치하는 사용자에게만 전송
+void tcp_send_to_target(char *user_id, int message_type, char* payload_buf, int payload_size) {
+	SOCKETINFO* ptr = SocketInfoList;
+	while (ptr) { // 접속중인 모든 사용자 루프
+		if (!strcmp(user_id, ptr->user_id.c_str())) {
+			MessageInfo message_info;
+			message_info.payload_length = payload_size;
+			message_info.payload_type = message_type;
+
+			// 먼저 고정길이(8바이트)의 메세지 정보(타입, 페이로드 길이)를 전송
+			int retval = send(ptr->sock, (char*)&message_info, sizeof(message_info), 0);
+			if (retval == SOCKET_ERROR) {
+				if (WSAGetLastError() != WSAEWOULDBLOCK)
+					err_display("[tcp_send_to_all] send messageinfo");
+				continue;
+			}
+
+			// 페이로드 전송
+			retval = send(ptr->sock, payload_buf, message_info.payload_length, 0);
+			if (retval == SOCKET_ERROR) {
+				if (WSAGetLastError() != WSAEWOULDBLOCK)
+					err_display("[tcp_send_to_all] send payload");
+				continue;
+			}
+
+			SOCKADDR_IN clientaddr;
+			int addrlen = sizeof(clientaddr);
+			getpeername(ptr->sock, (SOCKADDR*)&clientaddr, &addrlen);
+			printf("[%s] sent %d bytes to %s:%d\n", __func__, retval, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
+		}
+		ptr = ptr->next;
+	}
+}
+
+
+// 접속중인 클라이언트 정보 전송
+void send_clients_info() {
+	string result = "";
+
+	SOCKETINFO* ptr = SocketInfoList; // 접속중인 모든 사용자 루프
+	while (ptr) {
+		string curr_user_id = ptr->user_id;
+
+		result += curr_user_id + "|"; // |을 구분자로 사용하여 접속중인 사용자 이름 붙이기
+
+		ptr = ptr->next;
+	}
+	result.substr(0, result.length() - 1); // 마지막 한글자 떼기
+
+	// 모두에게 전송
+	tcp_send_to_all(USER_LIST_DATA, (char *)result.c_str(), result.length() + 1);
 }
 
 
@@ -87,12 +140,24 @@ void RemoveSocketInfo(SOCKET sock)
 
 	while (curr) {
 		if (curr->sock == sock) {
+			string exit_user_id = curr->user_id;
+			
+			// 노드 삭제
 			if (prev)
 				prev->next = curr->next;
 			else
 				SocketInfoList = curr->next;
 			closesocket(curr->sock);
 			delete curr;
+
+			// [아이디] 님이 퇴장했습니다 메시지 전송
+			char chat_msg[BUFSIZE];
+			sprintf_s(chat_msg, "[%s] 님이 퇴장했습니다.", exit_user_id.c_str());
+			tcp_send_to_all(CHATTING, chat_msg, strlen(chat_msg) + 1);
+
+			// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
+			send_clients_info();
+
 			return;
 		}
 		prev = curr;

@@ -213,27 +213,38 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		printf("Payload: %s\n", byteArrayToHexString(ptr->recv_buf, message_info.payload_length).c_str());
 #endif
 
-		ptr = GetSocketInfo(wParam);
-		if (!ptr) {
-			printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
-			return;
-		}
-		message_info = ptr->last_message_info;
-
 		if (ptr->recv_buf) {
+
 			if (message_info.payload_type == SET_USER_NAME) { // 초기 이름설정 처리
 				ptr->user_id = (char*)ptr->recv_buf; // 이름을 소켓 구조체에 저장해두기
 				printf("사용자 이름: %s\n", ptr->user_id.c_str());
 
+				// [아이디] 님이 입장했습니다 메시지 전송
 				char chat_msg[BUFSIZE];
-				sprintf_s(chat_msg, "[%s] 님이 입장했습니다.", ptr->user_id.c_str()); // [아이디] 님이 입장했습니다 메시지 전송
+				sprintf_s(chat_msg, "[%s] 님이 입장했습니다.", ptr->user_id.c_str());
 				tcp_send_to_all(CHATTING, chat_msg, strlen(chat_msg) + 1);
+
+				// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
+				send_clients_info();
 			}
-			else if (message_info.payload_type == CHATTING) { // 채팅 처리
+
+			else if (message_info.payload_type == CHATTING) { // 전체 채팅 처리
 				char chat_msg[BUFSIZE];
 				sprintf_s(chat_msg, "[%s] %s", ptr->user_id.c_str(), ptr->recv_buf); // [아이디] 채팅 형식으로 전송
 				tcp_send_to_all(message_info.payload_type, chat_msg, strlen(chat_msg) + 1);
 			}
+
+			else if (message_info.payload_type == SEND_WHISP) { // 귓속말 전송 처리
+				SEND_WHISP_DATA* recv_whisp_data = (SEND_WHISP_DATA *)ptr->recv_buf;
+
+				char chat_msg[BUFSIZE];
+				sprintf_s(chat_msg, "귓속말 [%s -> %s] %s", ptr->user_id.c_str(), recv_whisp_data->sender_id, recv_whisp_data->message);
+
+				// 타겟과 센더에게만 채팅 메시지 전송
+				tcp_send_to_target((char *)ptr->user_id.c_str(), CHATTING, chat_msg, strlen(chat_msg) + 1);
+				tcp_send_to_target(recv_whisp_data->sender_id, CHATTING, chat_msg, strlen(chat_msg) + 1);
+			}
+
 			else {
 				// 이외 경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
 				tcp_send_to_all(message_info.payload_type, (char*)ptr->recv_buf, message_info.payload_length);
@@ -247,6 +258,7 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case FD_WRITE:
 		break;
 	case FD_CLOSE:
+		// 클라이언트 종료시 소켓 정보 제거
 		RemoveSocketInfo(wParam);
 		break;
 	}
