@@ -51,10 +51,13 @@ struct SOCKETINFO
 	size_t recv_bytes;
 
 	string user_id; // 사용자 이름
+	bool is_muted; // 채팅 금지 상태인지 여부
 
 	SOCKETINFO* next;
 };
 extern SOCKETINFO* SocketInfoList;
+extern HWND g_UserList;
+extern HWND g_NoticeText;
 
 
 #define MSGSIZE     (BUFSIZE-sizeof(int))  // 채팅 메시지 최대 길이
@@ -81,6 +84,7 @@ void send_clients_info();
 // 소켓 관리 함수
 BOOL AddSocketInfo(SOCKET sock, string id);
 SOCKETINFO* GetSocketInfo(SOCKET sock);
+SOCKETINFO* GetSocketInfoByID(string user_id);
 void RemoveSocketInfo(SOCKET sock);
 
 // 오류 출력 함수

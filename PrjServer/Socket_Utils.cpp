@@ -84,6 +84,15 @@ void send_clients_info() {
 
 	// 모두에게 전송
 	tcp_send_to_all(USER_LIST_DATA, (char *)result.c_str(), result.length() + 1);
+
+	// 서버의 유저 리스트 갱신
+	SendMessage((HWND)g_UserList, LB_RESETCONTENT, 0, 0); // 리스트의 모든 항목 삭제
+
+	char* item_text = strtok((char *)result.c_str(), "|");
+	while (item_text != NULL) { // |를 기준으로 문자열 분리
+		SendMessageA((HWND)g_UserList, LB_ADDSTRING, 0, (LPARAM)item_text); // 리스트에 데이터 추가
+		item_text = strtok(NULL, "|");
+	}
 }
 
 
@@ -104,6 +113,8 @@ BOOL AddSocketInfo(SOCKET sock, string id)
 	ptr->recv_bytes = 0;
 
 	ptr->user_id = id;
+	ptr->is_muted = false;
+
 	ptr->next = SocketInfoList;
 	SocketInfoList = ptr;
 
@@ -119,6 +130,19 @@ SOCKETINFO* GetSocketInfo(SOCKET sock)
 
 	while (ptr) {
 		if (ptr->sock == sock)
+			return ptr;
+		ptr = ptr->next;
+	}
+
+	return NULL;
+}
+
+SOCKETINFO* GetSocketInfoByID(string user_id)
+{
+	SOCKETINFO* ptr = SocketInfoList;
+
+	while (ptr) {
+		if (!strcmp(user_id.c_str(), ptr->user_id.c_str()))
 			return ptr;
 		ptr = ptr->next;
 	}

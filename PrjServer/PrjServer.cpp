@@ -1,6 +1,8 @@
 #include "Global.h"
 
 SOCKETINFO* SocketInfoList;
+HWND g_UserList = NULL;
+HWND g_NoticeText = NULL;
 
 // 윈도우 메시지 처리 함수
 BOOL CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -80,10 +82,65 @@ void init_socket(HWND hWnd) {
 	/*** UDP 서버 코드 끝 ***/
 }
 
+SOCKETINFO* get_selected_user(string &user_id) {
+	// 선택된 항목의 인덱스를 가져오기
+	LRESULT selIndex = SendMessage((HWND)g_UserList, LB_GETCURSEL, 0, 0);
+	// 선택된 항목이 없는 경우 리턴
+	if (selIndex == LB_ERR)
+		return NULL;
+
+	char selected_user_id[USERNAMESIZE] = { 0 };
+	// 선택된 항목의 텍스트를 가져오기
+	SendMessageA((HWND)g_UserList, LB_GETTEXT, selIndex, (LPARAM)selected_user_id);
+
+	user_id = selected_user_id;
+	printf("[%s] selected user id=%s\n", __func__, selected_user_id);
+
+	SOCKETINFO* target_socket_info = GetSocketInfoByID(selected_user_id);
+	if (!target_socket_info) {
+		printf("[%s] 소켓 정보를 찾을 수 없습니다.\n", __func__);
+		return NULL;
+	}
+	return target_socket_info;
+}
+
+void kick_user() {
+	string user_id;
+	SOCKETINFO* target_socket_info = get_selected_user(user_id);
+	if (!target_socket_info)
+		return;
+
+	RemoveSocketInfo(target_socket_info->sock);
+
+	// [아이디] 님이 강제 퇴장되었습니다 메시지 전송
+	CHAT_MSG chat_msg;
+	chat_msg.color = RGB(255, 0, 0); // 빨간색
+	sprintf_s(chat_msg.buf, "[%s] 님이 강제 퇴장되었습니다.", user_id.c_str());
+	tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+}
+
+void mute_user(bool toggle) {
+	string user_id;
+	SOCKETINFO* target_socket_info = get_selected_user(user_id);
+	if (!target_socket_info)
+		return;
+
+	target_socket_info->is_muted = toggle;
+
+	// 메시지 전송
+	CHAT_MSG chat_msg;
+	chat_msg.color = RGB(255, 0, 0); // 빨간색
+	string status = (toggle) ? "금지" : "허용";
+	sprintf_s(chat_msg.buf, "[%s] 님의 채팅이 %s되었습니다.", user_id.c_str(), status.c_str());
+	tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+}
+
 // Dialog 이벤트 처리 프로시저
 BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 	switch (uMsg) {
 	case WM_INITDIALOG:
+		g_UserList = GetDlgItem(hDlg, IDC_USERLIST);
+		g_NoticeText = GetDlgItem(hDlg, IDC_NOTICETEXT);
 		init_socket(hDlg);
 		return TRUE;
 
@@ -93,10 +150,23 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 			EndDialog(hDlg, IDCANCEL);
 			return TRUE;
 
+		case IDC_KICKUSER:
+			kick_user();
+			return TRUE;
 
+		case IDC_MUTEUSER:
+			mute_user(true);
+			return TRUE;
+
+		case IDC_UNMUTEUSER:
+			mute_user(false);
+			return TRUE;
+
+		case IDC_NOTICETEXT:
+			return TRUE;
 		}
 	}
-	return TRUE;
+	return FALSE;
 }
 
 // 윈도우 메시지 처리
@@ -105,20 +175,19 @@ BOOL CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch(uMsg){
 	case WM_INITDIALOG:
 	case WM_COMMAND: // Dialog 관련 이벤트 처리
-		DlgProc(hWnd, uMsg, wParam, lParam);
-		return 0;
+		return DlgProc(hWnd, uMsg, wParam, lParam);
 
 	case WM_SOCKET: // TCP 소켓 관련 윈도우 메시지
 		ProcessTCPSocketMessage(hWnd, uMsg, wParam, lParam);
-		return 0;
+		return TRUE;
 
 	case WM_UDP_SOCKET: /*** UDP 소켓 관련 윈도우 메시지 ***/
 		ProcessUDPSocketMessage(hWnd, uMsg, wParam, lParam);
-		return 0;
+		return TRUE;
 
 	case WM_DESTROY:
 		PostQuitMessage(0);
-		return 0;
+		return TRUE;
 	}
 	return DefWindowProc(hWnd, uMsg, wParam, lParam);
 }
@@ -190,7 +259,7 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 		// 페이로드 크기만큼 메모리 동적할당
 		// malloc 사용시 크기가 큰 이미지파일 수신할 때 할당이 제대로 이루어지지 않아 Windows API 사용
-		ptr->recv_buf = (char*)VirtualAlloc(NULL, 0xFFFFFFF, MEM_COMMIT, PAGE_READWRITE);
+		ptr->recv_buf = (char*)VirtualAlloc(NULL, 0x0FFFFFFF, MEM_COMMIT, PAGE_READWRITE);
 		if (!ptr->recv_buf) {
 			err_display("[ProcessTCPSocketMessage] alloc");
 			return;
@@ -248,11 +317,19 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			else if (message_info.payload_type == SEND_CHAT) { // 전체 채팅 처리
 				CHAT_MSG* recv_chat_msg = (CHAT_MSG*)ptr->recv_buf;
 
-				CHAT_MSG chat_msg;
-				chat_msg.color = RGB(0, 0, 0); // 검은색
-				sprintf_s(chat_msg.buf, "[%s] %s", ptr->user_id.c_str(), recv_chat_msg->buf); // [아이디] 채팅 형식으로 전송
+				if (!ptr->is_muted) { // 채팅금지 상태가 아닐 때
+					CHAT_MSG chat_msg;
+					chat_msg.color = RGB(0, 0, 0); // 검은색
+					sprintf_s(chat_msg.buf, "[%s] %s", ptr->user_id.c_str(), recv_chat_msg->buf); // [아이디] 채팅 형식으로 전송
 
-				tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+					tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+				}
+				else { // 채팅금지 상태일 때
+					CHAT_MSG chat_msg;
+					chat_msg.color = RGB(255, 0, 0); // 빨간색
+					strcpy(chat_msg.buf, "채팅금지 상태이므로 전체채팅을 보낼 수 없습니다.");
+					tcp_send_to_target((char *)ptr->user_id.c_str(), RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+				}
 			}
 
 			else if (message_info.payload_type == SEND_WHISP) { // 귓속말 전송 처리
