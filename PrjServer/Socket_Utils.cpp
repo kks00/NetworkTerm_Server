@@ -151,9 +151,10 @@ void RemoveSocketInfo(SOCKET sock)
 			delete curr;
 
 			// [아이디] 님이 퇴장했습니다 메시지 전송
-			char chat_msg[BUFSIZE];
-			sprintf_s(chat_msg, "[%s] 님이 퇴장했습니다.", exit_user_id.c_str());
-			tcp_send_to_all(CHATTING, chat_msg, strlen(chat_msg) + 1);
+			CHAT_MSG chat_msg;
+			chat_msg.color = RGB(255, 0, 0); // 빨간색
+			sprintf_s(chat_msg.buf, "[%s] 님이 퇴장했습니다.", exit_user_id.c_str());
+			tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 
 			// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
 			send_clients_info();

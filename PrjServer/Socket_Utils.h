@@ -13,8 +13,9 @@
 #define USER_LIST_DATA 1103
 #define SEND_WHISP 1104
 #define RECV_WHISP 1105
+#define SEND_CHAT 1106
+#define RECV_MESSAGE 1107
 
-#define CHATTING			  1000          // 메시지 타입: 채팅
 #define DRAW_LINE             1001			// 메시지 타입: 선
 #define DRAW_STRAIGHTLINE     1002			// 메시지 타입: 직선
 #define DRAW_ELLIPSE          1003			// 메시지 타입: 타원
@@ -56,8 +57,15 @@ struct SOCKETINFO
 extern SOCKETINFO* SocketInfoList;
 
 
-#define USERNAMESIZE 32 // 사용자 이름 최대길이
 #define MSGSIZE     (BUFSIZE-sizeof(int))  // 채팅 메시지 최대 길이
+// 채팅 메시지 형식
+struct CHAT_MSG
+{
+	COLORREF color; // 메시지 색상
+	char buf[MSGSIZE]; // 메시지 데이터
+};
+
+#define USERNAMESIZE 32 // 사용자 이름 최대길이
 // 귓속말 전송 데이터 구조체 정의
 struct SEND_WHISP_DATA {
 	char sender_id[USERNAMESIZE];

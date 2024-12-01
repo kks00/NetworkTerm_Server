@@ -3,43 +3,43 @@
 SOCKETINFO* SocketInfoList;
 
 // 윈도우 메시지 처리 함수
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
+BOOL CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+
+void init_socket(HWND hWnd);
 void ProcessTCPSocketMessage(HWND, UINT, WPARAM, LPARAM);
 void ProcessUDPSocketMessage(HWND, UINT, WPARAM, LPARAM);
 
-int main(int argc, char *argv[])
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+	LPSTR lpCmdLine, int nCmdShow)
 {
-	int retval;
+	// 디버깅 모드일 시 콘솔 생성
+#ifdef DEBUG_MODE
+	if (AllocConsole()) {
+		freopen("CONIN$", "r", stdin);
+		freopen("CONOUT$", "w", stdout);
+		freopen("CONOUT$", "w", stderr);
 
-	// 윈도우 클래스 등록
-	WNDCLASS wndclass;
-	wndclass.style = CS_HREDRAW | CS_VREDRAW;
-	wndclass.lpfnWndProc = WndProc;
-	wndclass.cbClsExtra = 0;
-	wndclass.cbWndExtra = 0;
-	wndclass.hInstance = NULL;
-	wndclass.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-	wndclass.hCursor = LoadCursor(NULL, IDC_ARROW);
-	wndclass.hbrBackground = (HBRUSH)GetStockObject(WHITE_BRUSH);
-	wndclass.lpszMenuName = NULL;
-	wndclass.lpszClassName = L"MyWndClass";
-	if(!RegisterClass(&wndclass)) return 1;
-
-	// 윈도우 생성
-	HWND hWnd = CreateWindowA("MyWndClass", "서버", WS_OVERLAPPEDWINDOW,
-		0, 0, 600, 200, NULL, NULL, NULL, NULL);
-	if(hWnd == NULL) return 1;
-	ShowWindow(hWnd, SW_SHOWNORMAL);
-	UpdateWindow(hWnd);
+		setbuf(stdout, NULL);
+	}
+#endif
 
 	// 윈속 초기화
 	WSADATA wsa;
-	if(WSAStartup(MAKEWORD(2,2), &wsa) != 0)
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
 		return 1;
 
+	DialogBox(hInstance, MAKEINTRESOURCE(IDD_DIALOG1), NULL, WndProc);
+
+	// 윈속 종료
+	WSACleanup();
+	return 0;
+}
+
+// TCP, UDP 소켓 생성함수
+void init_socket(HWND hWnd) {
 	// socket()
 	SOCKET listen_sock = socket(AF_INET, SOCK_STREAM, 0);
-	if(listen_sock == INVALID_SOCKET) err_quit("socket()");
+	if (listen_sock == INVALID_SOCKET) err_quit("socket()");
 
 	// bind()
 	SOCKADDR_IN serveraddr;
@@ -47,60 +47,75 @@ int main(int argc, char *argv[])
 	serveraddr.sin_family = AF_INET;
 	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serveraddr.sin_port = htons(SERVERPORT);
-	retval = bind(listen_sock, (SOCKADDR *)&serveraddr, sizeof(serveraddr));
-	if(retval == SOCKET_ERROR) err_quit("bind()");
+	int retval = bind(listen_sock, (SOCKADDR*)&serveraddr, sizeof(serveraddr));
+	if (retval == SOCKET_ERROR) err_quit("bind()");
 
 	// listen()
 	retval = listen(listen_sock, SOMAXCONN);
-	if(retval == SOCKET_ERROR) err_quit("listen()");
+	if (retval == SOCKET_ERROR) err_quit("listen()");
 
 	// WSAAsyncSelect()
 	retval = WSAAsyncSelect(listen_sock, hWnd,
-		WM_SOCKET, FD_ACCEPT|FD_CLOSE);
-	if(retval == SOCKET_ERROR) err_quit("WSAAsyncSelect()");
+		WM_SOCKET, FD_ACCEPT | FD_CLOSE);
+	if (retval == SOCKET_ERROR) err_quit("WSAAsyncSelect()");
 
 
 	/*** UDP 서버 코드 시작 ***/
 	// socket()
 	SOCKET udp_sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if(udp_sock == INVALID_SOCKET) err_quit("socket()");
+	if (udp_sock == INVALID_SOCKET) err_quit("socket()");
 
 	// bind()
 	ZeroMemory(&serveraddr, sizeof(serveraddr));
 	serveraddr.sin_family = AF_INET;
 	serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	serveraddr.sin_port = htons(SERVERPORT);
-	retval = bind(udp_sock, (SOCKADDR *)&serveraddr, sizeof(serveraddr));
-	if(retval == SOCKET_ERROR) err_quit("bind()");
+	retval = bind(udp_sock, (SOCKADDR*)&serveraddr, sizeof(serveraddr));
+	if (retval == SOCKET_ERROR) err_quit("bind()");
 
 	// WSAAsyncSelect()
 	retval = WSAAsyncSelect(udp_sock, hWnd,
 		WM_UDP_SOCKET, FD_READ);
-	if(retval == SOCKET_ERROR) err_quit("WSAAsyncSelect()");
+	if (retval == SOCKET_ERROR) err_quit("WSAAsyncSelect()");
 	/*** UDP 서버 코드 끝 ***/
+}
 
-	// 메시지 루프
-	MSG msg;
-	while(GetMessage(&msg, 0, 0, 0) > 0){
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+// Dialog 이벤트 처리 프로시저
+BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+	switch (uMsg) {
+	case WM_INITDIALOG:
+		init_socket(hDlg);
+		return TRUE;
+
+	case WM_COMMAND:
+		switch (LOWORD(wParam)) {
+		case IDCANCEL:
+			EndDialog(hDlg, IDCANCEL);
+			return TRUE;
+
+
+		}
 	}
-
-	// 윈속 종료
-	WSACleanup();
-	return msg.wParam;
+	return TRUE;
 }
 
 // 윈도우 메시지 처리
-LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+BOOL CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	switch(uMsg){
+	case WM_INITDIALOG:
+	case WM_COMMAND: // Dialog 관련 이벤트 처리
+		DlgProc(hWnd, uMsg, wParam, lParam);
+		return 0;
+
 	case WM_SOCKET: // TCP 소켓 관련 윈도우 메시지
 		ProcessTCPSocketMessage(hWnd, uMsg, wParam, lParam);
 		return 0;
+
 	case WM_UDP_SOCKET: /*** UDP 소켓 관련 윈도우 메시지 ***/
 		ProcessUDPSocketMessage(hWnd, uMsg, wParam, lParam);
 		return 0;
+
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		return 0;
@@ -149,7 +164,7 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	case FD_READ:
 		ptr = GetSocketInfo(wParam);
 		if (!ptr) {
-			printf("[%s] Socket 정보를 찾을 수 없습니다.", __func__);
+			printf("[%s] Socket 정보를 찾을 수 없습니다.\n", __func__);
 			return;
 		}
 		message_info = ptr->last_message_info;
@@ -173,7 +188,8 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		ptr->is_info_received = true;
 		ptr->recv_bytes = 0;
 
-		// 메모리 동적할당
+		// 페이로드 크기만큼 메모리 동적할당
+		// malloc 사용시 크기가 큰 이미지파일 수신할 때 할당이 제대로 이루어지지 않아 Windows API 사용
 		ptr->recv_buf = (char*)VirtualAlloc(NULL, 0xFFFFFFF, MEM_COMMIT, PAGE_READWRITE);
 		if (!ptr->recv_buf) {
 			err_display("[ProcessTCPSocketMessage] alloc");
@@ -203,12 +219,12 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 		ptr->recv_bytes += retval;
 		if (ptr->recv_bytes < ptr->last_message_info.payload_length)
-			return;
+			return; // 데이터 수신이 덜되었다면 대기
 
 		// 모두 수신완료 되었을 때 처리 시작
 		ptr->is_info_received = false;
 
-		// 받은 메세지 출력
+		// 받은 메시지 출력
 #ifdef LOG_PACKET_RAW
 		printf("Payload: %s\n", byteArrayToHexString(ptr->recv_buf, message_info.payload_length).c_str());
 #endif
@@ -220,33 +236,38 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				printf("사용자 이름: %s\n", ptr->user_id.c_str());
 
 				// [아이디] 님이 입장했습니다 메시지 전송
-				char chat_msg[BUFSIZE];
-				sprintf_s(chat_msg, "[%s] 님이 입장했습니다.", ptr->user_id.c_str());
-				tcp_send_to_all(CHATTING, chat_msg, strlen(chat_msg) + 1);
+				CHAT_MSG chat_msg;
+				chat_msg.color = RGB(0, 255, 0); // 초록색
+				sprintf_s(chat_msg.buf, "[%s] 님이 입장했습니다.", ptr->user_id.c_str());
+				tcp_send_to_all(RECV_MESSAGE, (char *)&chat_msg, sizeof(chat_msg));
 
 				// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
 				send_clients_info();
 			}
 
-			else if (message_info.payload_type == CHATTING) { // 전체 채팅 처리
-				char chat_msg[BUFSIZE];
-				sprintf_s(chat_msg, "[%s] %s", ptr->user_id.c_str(), ptr->recv_buf); // [아이디] 채팅 형식으로 전송
-				tcp_send_to_all(message_info.payload_type, chat_msg, strlen(chat_msg) + 1);
+			else if (message_info.payload_type == SEND_CHAT) { // 전체 채팅 처리
+				CHAT_MSG* recv_chat_msg = (CHAT_MSG*)ptr->recv_buf;
+
+				CHAT_MSG chat_msg;
+				chat_msg.color = RGB(0, 0, 0); // 검은색
+				sprintf_s(chat_msg.buf, "[%s] %s", ptr->user_id.c_str(), recv_chat_msg->buf); // [아이디] 채팅 형식으로 전송
+
+				tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 			}
 
 			else if (message_info.payload_type == SEND_WHISP) { // 귓속말 전송 처리
 				SEND_WHISP_DATA* recv_whisp_data = (SEND_WHISP_DATA *)ptr->recv_buf;
 
-				char chat_msg[BUFSIZE];
-				sprintf_s(chat_msg, "귓속말 [%s -> %s] %s", ptr->user_id.c_str(), recv_whisp_data->sender_id, recv_whisp_data->message);
+				CHAT_MSG chat_msg;
+				chat_msg.color = RGB(0, 0, 255); // 파란색
+				sprintf_s(chat_msg.buf, "귓속말 [%s -> %s] %s", ptr->user_id.c_str(), recv_whisp_data->sender_id, recv_whisp_data->message);
 
 				// 타겟과 센더에게만 채팅 메시지 전송
-				tcp_send_to_target((char *)ptr->user_id.c_str(), CHATTING, chat_msg, strlen(chat_msg) + 1);
-				tcp_send_to_target(recv_whisp_data->sender_id, CHATTING, chat_msg, strlen(chat_msg) + 1);
+				tcp_send_to_target((char *)ptr->user_id.c_str(), RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+				tcp_send_to_target(recv_whisp_data->sender_id, RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 			}
 
-			else {
-				// 이외 경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
+			else { // 이외 경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
 				tcp_send_to_all(message_info.payload_type, (char*)ptr->recv_buf, message_info.payload_length);
 			}
 
@@ -282,9 +303,8 @@ void ProcessUDPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	// 메시지 처리
 	switch (WSAGETSELECTEVENT(lParam)) {
 	case FD_READ:
-		// 데이터 받기
-		MessageInfo message_info;
 		// 고정길이(8바이트)의 메세지 정보(메세지 타입, 페이로드 길이)를 수신
+		MessageInfo message_info;
 		addrlen = sizeof(clientaddr);
 		retval = recvfrom(sock, (char*)&message_info, sizeof(message_info), 0, (sockaddr*)&clientaddr, &addrlen);
 		if (retval == 0 || retval == SOCKET_ERROR) {
