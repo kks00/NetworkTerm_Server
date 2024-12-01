@@ -5,9 +5,10 @@
 #define BUFSIZE       512
 #define SERVERPORT    9000
 
-
 // 메시지 타입 정의
 #define MESSAGE_INFO 1100
+
+// TCP전송 메시지 타입 정의
 #define SET_USER_NAME 1101
 #define UPLOAD_IMAGE 1102
 #define USER_LIST_DATA 1103
@@ -15,7 +16,9 @@
 #define RECV_WHISP 1105
 #define SEND_CHAT 1106
 #define RECV_MESSAGE 1107
+#define NAME_ALREADY_EXISTS 1108
 
+// UDP전송 메시지 타입 정의
 #define DRAW_LINE             1001			// 메시지 타입: 선
 #define DRAW_STRAIGHTLINE     1002			// 메시지 타입: 직선
 #define DRAW_ELLIPSE          1003			// 메시지 타입: 타원
@@ -75,7 +78,7 @@ struct SEND_WHISP_DATA {
 	char message[MSGSIZE];
 };
 
-
+int send_tcp_payload(SOCKET sock, int message_type, char* payload_buf, int payload_size);
 void tcp_send_to_all(int message_type, char* payload_buf, int payload_size);
 void tcp_send_to_target(char* user_id, int message_type, char* payload_buf, int payload_size);
 

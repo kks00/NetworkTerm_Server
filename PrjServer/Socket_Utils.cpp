@@ -1,34 +1,38 @@
 #include "Socket_Utils.h"
 
+int send_tcp_payload(SOCKET sock, int message_type, char* payload_buf, int payload_size) {
+	MessageInfo message_info;
+	message_info.payload_length = payload_size;
+	message_info.payload_type = message_type;
+
+	// 먼저 고정길이(8바이트)의 메세지 정보(타입, 페이로드 길이)를 전송
+	int retval = send(sock, (char*)&message_info, sizeof(message_info), 0);
+	if (retval == SOCKET_ERROR) {
+		if (WSAGetLastError() != WSAEWOULDBLOCK)
+			err_display("[tcp_send_to_all] send messageinfo");
+		return retval;
+	}
+
+	// 페이로드 전송
+	retval = send(sock, payload_buf, message_info.payload_length, 0);
+	if (retval == SOCKET_ERROR) {
+		if (WSAGetLastError() != WSAEWOULDBLOCK)
+			err_display("[tcp_send_to_all] send payload");
+		return retval;
+	}
+
+	SOCKADDR_IN clientaddr;
+	int addrlen = sizeof(clientaddr);
+	getpeername(sock, (SOCKADDR*)&clientaddr, &addrlen);
+	printf("[%s] sent %d bytes to %s:%d\n", __func__, retval, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
+	return retval;
+}
+
 // 접속한 모든 클라이언트에게 받은 데이터 보내기
 void tcp_send_to_all(int message_type, char* payload_buf, int payload_size) {
 	SOCKETINFO* ptr = SocketInfoList;
 	while (ptr) { // 접속중인 모든 사용자 루프
-		MessageInfo message_info;
-		message_info.payload_length = payload_size;
-		message_info.payload_type = message_type;
-
-		// 먼저 고정길이(8바이트)의 메세지 정보(타입, 페이로드 길이)를 전송
-		int retval = send(ptr->sock, (char*)&message_info, sizeof(message_info), 0);
-		if (retval == SOCKET_ERROR) {
-			if (WSAGetLastError() != WSAEWOULDBLOCK)
-				err_display("[tcp_send_to_all] send messageinfo");
-			continue;
-		}
-
-		// 페이로드 전송
-		retval = send(ptr->sock, payload_buf, message_info.payload_length, 0);
-		if (retval == SOCKET_ERROR) {
-			if (WSAGetLastError() != WSAEWOULDBLOCK)
-				err_display("[tcp_send_to_all] send payload");
-			continue;
-		}
-
-		SOCKADDR_IN clientaddr;
-		int addrlen = sizeof(clientaddr);
-		getpeername(ptr->sock, (SOCKADDR*)&clientaddr, &addrlen);
-		printf("[%s] sent %d bytes to %s:%d\n", __func__, retval, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
-
+		send_tcp_payload(ptr->sock, message_type, payload_buf, payload_size);
 		ptr = ptr->next;
 	}
 }
@@ -38,30 +42,7 @@ void tcp_send_to_target(char *user_id, int message_type, char* payload_buf, int 
 	SOCKETINFO* ptr = SocketInfoList;
 	while (ptr) { // 접속중인 모든 사용자 루프
 		if (!strcmp(user_id, ptr->user_id.c_str())) {
-			MessageInfo message_info;
-			message_info.payload_length = payload_size;
-			message_info.payload_type = message_type;
-
-			// 먼저 고정길이(8바이트)의 메세지 정보(타입, 페이로드 길이)를 전송
-			int retval = send(ptr->sock, (char*)&message_info, sizeof(message_info), 0);
-			if (retval == SOCKET_ERROR) {
-				if (WSAGetLastError() != WSAEWOULDBLOCK)
-					err_display("[tcp_send_to_all] send messageinfo");
-				continue;
-			}
-
-			// 페이로드 전송
-			retval = send(ptr->sock, payload_buf, message_info.payload_length, 0);
-			if (retval == SOCKET_ERROR) {
-				if (WSAGetLastError() != WSAEWOULDBLOCK)
-					err_display("[tcp_send_to_all] send payload");
-				continue;
-			}
-
-			SOCKADDR_IN clientaddr;
-			int addrlen = sizeof(clientaddr);
-			getpeername(ptr->sock, (SOCKADDR*)&clientaddr, &addrlen);
-			printf("[%s] sent %d bytes to %s:%d\n", __func__, retval, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
+			send_tcp_payload(ptr->sock, message_type, payload_buf, payload_size);
 		}
 		ptr = ptr->next;
 	}
@@ -175,10 +156,12 @@ void RemoveSocketInfo(SOCKET sock)
 			delete curr;
 
 			// [아이디] 님이 퇴장했습니다 메시지 전송
-			CHAT_MSG chat_msg;
-			chat_msg.color = RGB(255, 0, 0); // 빨간색
-			sprintf_s(chat_msg.buf, "[%s] 님이 퇴장했습니다.", exit_user_id.c_str());
-			tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+			if (exit_user_id.length() > 0) {
+				CHAT_MSG chat_msg;
+				chat_msg.color = RGB(255, 0, 0); // 빨간색
+				sprintf_s(chat_msg.buf, "[%s] 님이 퇴장했습니다.", exit_user_id.c_str());
+				tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+			}
 
 			// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
 			send_clients_info();

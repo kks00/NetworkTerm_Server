@@ -301,17 +301,24 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		if (ptr->recv_buf) {
 
 			if (message_info.payload_type == SET_USER_NAME) { // 초기 이름설정 처리
-				ptr->user_id = (char*)ptr->recv_buf; // 이름을 소켓 구조체에 저장해두기
-				printf("사용자 이름: %s\n", ptr->user_id.c_str());
+				if (GetSocketInfoByID((char*)ptr->recv_buf)) {
+					// 이미 사용중인 이름이면 클라이언트에게 알리기
+					bool dummy = true;
+					send_tcp_payload(ptr->sock, NAME_ALREADY_EXISTS, (char*)&dummy, sizeof(dummy));
+				}
+				else {
+					ptr->user_id = (char*)ptr->recv_buf; // 이름을 소켓 구조체에 저장해두기
+					printf("사용자 이름: %s\n", ptr->user_id.c_str());
 
-				// [아이디] 님이 입장했습니다 메시지 전송
-				CHAT_MSG chat_msg;
-				chat_msg.color = RGB(0, 255, 0); // 초록색
-				sprintf_s(chat_msg.buf, "[%s] 님이 입장했습니다.", ptr->user_id.c_str());
-				tcp_send_to_all(RECV_MESSAGE, (char *)&chat_msg, sizeof(chat_msg));
+					// [아이디] 님이 입장했습니다 메시지 전송
+					CHAT_MSG chat_msg;
+					chat_msg.color = RGB(0, 255, 0); // 초록색
+					sprintf_s(chat_msg.buf, "[%s] 님이 입장했습니다.", ptr->user_id.c_str());
+					tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 
-				// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
-				send_clients_info();
+					// 접속중인 모든 클라이언트에게 현재 접속중인 유저 정보 전송
+					send_clients_info();
+				}
 			}
 
 			else if (message_info.payload_type == SEND_CHAT) { // 전체 채팅 처리
@@ -322,12 +329,15 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 					chat_msg.color = RGB(0, 0, 0); // 검은색
 					sprintf_s(chat_msg.buf, "[%s] %s", ptr->user_id.c_str(), recv_chat_msg->buf); // [아이디] 채팅 형식으로 전송
 
+					// 전체에게 채팅 전송
 					tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 				}
 				else { // 채팅금지 상태일 때
 					CHAT_MSG chat_msg;
 					chat_msg.color = RGB(255, 0, 0); // 빨간색
 					strcpy(chat_msg.buf, "채팅금지 상태이므로 전체채팅을 보낼 수 없습니다.");
+
+					// 센더에게만 메시지 전송
 					tcp_send_to_target((char *)ptr->user_id.c_str(), RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 				}
 			}
