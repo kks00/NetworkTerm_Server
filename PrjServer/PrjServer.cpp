@@ -1,5 +1,7 @@
 #include "Global.h"
 
+SOCKET g_BroadcastSocket;
+SOCKADDR_IN g_BroadcastAddr;
 SOCKETINFO* SocketInfoList;
 HWND g_UserList = NULL;
 HWND g_NoticeText = NULL;
@@ -80,6 +82,21 @@ void init_socket(HWND hWnd) {
 		WM_UDP_SOCKET, FD_READ);
 	if (retval == SOCKET_ERROR) err_quit("WSAAsyncSelect()");
 	/*** UDP 서버 코드 끝 ***/
+
+
+	// 소켓옵션활용: 공지 송신용 브로드캐스트 UDP 소켓 생성
+	g_BroadcastSocket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (udp_sock == INVALID_SOCKET) err_quit("socket()");
+
+	DWORD bEnable = 1;
+	retval = setsockopt(g_BroadcastSocket, SOL_SOCKET, SO_BROADCAST, (char *)&bEnable, sizeof(bEnable));
+	if (retval == SOCKET_ERROR) err_quit("setsockopt()");
+
+	// 브로드캐스트 주소 초기화
+	ZeroMemory(&g_BroadcastAddr, sizeof(g_BroadcastAddr));
+	g_BroadcastAddr.sin_family = AF_INET;
+	g_BroadcastAddr.sin_addr.s_addr = inet_addr("255.255.255.255");
+	g_BroadcastAddr.sin_port = htons(BROADCASTPORT);
 }
 
 SOCKETINFO* get_selected_user(string &user_id) {
@@ -135,12 +152,31 @@ void mute_user(bool toggle) {
 	tcp_send_to_all(RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 }
 
+// 브로드캐스트로 공지 전송
+void send_notice() {
+	char message[MSGSIZE];
+	memset(message, 0, MSGSIZE);
+
+	// 입력한 메시지 가져오기
+	SendMessageA((HWND)g_NoticeText, WM_GETTEXT, (WPARAM)MSGSIZE, (LPARAM)message);
+
+	int retval = sendto(g_BroadcastSocket, message, MSGSIZE, 0, (sockaddr*)&g_BroadcastAddr, sizeof(g_BroadcastAddr));
+	if (retval == SOCKET_ERROR) {
+		err_display("send_notice sendto()");
+		return;
+	}
+	printf("[%s] send %d bytes.\n", __func__, retval);
+}
+
 // Dialog 이벤트 처리 프로시저
 BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 	switch (uMsg) {
 	case WM_INITDIALOG:
 		g_UserList = GetDlgItem(hDlg, IDC_USERLIST);
+
 		g_NoticeText = GetDlgItem(hDlg, IDC_NOTICETEXT);
+		SendMessage(g_NoticeText, EM_SETLIMITTEXT, MSGSIZE, 0); // 공지 최대 길이 설정
+
 		init_socket(hDlg);
 		return TRUE;
 
@@ -162,7 +198,8 @@ BOOL CALLBACK DlgProc(HWND hDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 			mute_user(false);
 			return TRUE;
 
-		case IDC_NOTICETEXT:
+		case IDC_SENDNOTICE:
+			send_notice();
 			return TRUE;
 		}
 	}
@@ -347,11 +384,11 @@ void ProcessTCPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 				CHAT_MSG chat_msg;
 				chat_msg.color = RGB(0, 0, 255); // 파란색
-				sprintf_s(chat_msg.buf, "귓속말 [%s -> %s] %s", ptr->user_id.c_str(), recv_whisp_data->sender_id, recv_whisp_data->message);
+				sprintf_s(chat_msg.buf, "귓속말 [%s -> %s] %s", ptr->user_id.c_str(), recv_whisp_data->receiver_id, recv_whisp_data->message);
 
 				// 타겟과 센더에게만 채팅 메시지 전송
 				tcp_send_to_target((char *)ptr->user_id.c_str(), RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
-				tcp_send_to_target(recv_whisp_data->sender_id, RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
+				tcp_send_to_target(recv_whisp_data->receiver_id, RECV_MESSAGE, (char*)&chat_msg, sizeof(chat_msg));
 			}
 
 			else { // 이외 경우 접속해있는 모든 클라이언트에게 받은 데이터 그대로 전송
@@ -426,7 +463,7 @@ void ProcessUDPSocketMessage(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		printf("Payload: %s\n", byteArrayToHexString(recv_buf, message_info.payload_length).c_str());
 #endif
 
-		// 접속해있는 모든 클라이언트에게 TCP로 현재 받은 데이터 전송
+		// 접속해있는 모든 클라이언트에게 TCP로 현재 받은 데이터 그대로 전송
 		tcp_send_to_all(message_info.payload_type, (char*)recv_buf, message_info.payload_length);
 
 		// 처리 후 버퍼 할당해제
